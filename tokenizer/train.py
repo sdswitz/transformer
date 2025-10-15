@@ -3,7 +3,7 @@ import time
 
 from basic_bpe import BasicTokenizer
 
-with open('/Users/samswitz/GitHub/micro-research/transformer/data/input.txt', 'r', encoding='utf-8') as f:
+with open('/Users/samswitz/GitHub/transformer/data/input.txt', 'r', encoding='utf-8') as f:
     text = f.read()
 print('big load of data')
 
@@ -13,7 +13,7 @@ tokenizer = BasicTokenizer()
 t0 = time.time()
 
 tokenizer.train(text, vocab_size)
-prefix = '/Users/samswitz/GitHub/micro-research/transformer/tokenizer'
+prefix = '/Users/samswitz/GitHub/transformer/tokenizer'
 tokenizer.save(prefix)
 
 t1 = time.time()

@@ -40,7 +40,7 @@ model.to(device)
 enc = BasicTokenizer()
 
 ## TODO Parameterize this
-enc.load('/Users/samswitz/GitHub/micro-research/transformer/tokenizer.model')
+enc.load('/Users/samswitz/GitHub/transformer/tokenizer.model')
 
 start_ids = enc.encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
