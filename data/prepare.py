@@ -27,7 +27,7 @@ val_data = data[int(n*0.9):]
 # encode with tiktoken gpt2 bpe
 enc = BasicTokenizer()
 # janky
-enc_path = os.getcwd() + 'tokenizer.model'
+enc_path = os.getcwd() + '/tokenizer.model'
 # enc.load('/Users/samswitz/GitHub/transformer/tokenizer.model')
 enc.load(enc_path)
 
