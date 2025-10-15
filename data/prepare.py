@@ -26,7 +26,10 @@ val_data = data[int(n*0.9):]
 
 # encode with tiktoken gpt2 bpe
 enc = BasicTokenizer()
-enc.load('/Users/samswitz/GitHub/transformer/tokenizer.model')
+# janky
+enc_path = os.getcwd()[:-4] + 'tokenizer.model'
+# enc.load('/Users/samswitz/GitHub/transformer/tokenizer.model')
+enc.load(enc_path)
 
 
 train_ids = enc.encode(train_data)
