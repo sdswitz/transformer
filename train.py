@@ -3,6 +3,7 @@ import time
 import math
 import pickle
 from contextlib import nullcontext
+from dataclasses import dataclass
 
 # import sys
 
@@ -15,10 +16,13 @@ from model import GPTConfig, GPT
 from tokenizer.basic_bpe import BasicTokenizer
 
 # hyperparameters
-block_size = 32
-batch_size = 16
-max_iters = 2000
-eval_interval = 100
+# block_size = 32
+# batch_size = 64
+
+
+max_iters = 5000
+eval_interval = 200
+
 learning_rate = 1e-3
 if torch.cuda.is_available():
     device = 'cuda'
@@ -26,9 +30,24 @@ elif torch.backends.mps.is_available():
     device = 'mps'
 else:
     device = 'cpu'
-# device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+
+
 eval_iters = int(max_iters * 0.05)
-vocab_size = 512 # Parameterize this
+
+
+# @dataclass
+# class GPTConfig:
+#     block_size: int = 1024
+#     # vocab_size: int = enc.n_vocab # need to expirement with this
+#     vocab_size: int = 256
+#     n_layer: int = 12
+#     n_head: int = 12
+#     n_embd: int = 768
+#     dropout: float = 0.0
+#     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+
+enc = BasicTokenizer()    
 
 out_dir = 'output'
 os.makedirs(out_dir, exist_ok=True)
@@ -36,38 +55,20 @@ print(f"using device: {device}")
 print(f"output directory: {out_dir}")
 
 # model
-n_layer = 8
-n_head = 8
-n_embd = 512
-dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
-bias = False # do we use bias inside LayerNorm and Linear layers?
+batch_size = 64
 
-# import sys; sys.exit(0)
+block_size: int = 1024
+vocab_size: int = len(enc.vocab)
+n_layer: int = 12
+n_head: int = 12
+n_embd: int = 768
+dropout: float = 0.0
+bias: bool = False
 
+model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
+                  bias=bias, vocab_size=1024, dropout=dropout) # start with model_args from command line
 
-torch.manual_seed(327)
-
-
-### unneeded tokenization stuff
-
-# wget https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt
-# with open('/Users/samswitz/GitHub/micro-research/transformer/data/input.txt', 'r', encoding='utf-8') as f:
-#     text = f.read()
-# print('big load of data')
-
-# tokenizer = BasicTokenizer()
-# tokenizer.train(text, vocab_size)
-
-# # Train and test splits
-# data = torch.tensor(tokenizer.encode(text), dtype=torch.long)
-# print('successfully trained tokenizer')
-# import sys; sys.exit(0)
-
-# n = int(0.9*len(data)) # first 90% will be train, rest val
-# train_data = data[:n]
-# val_data = data[n:]
-
-###
+config = GPTConfig(**model_args)
 
 
 data_dir = os.path.join('data')
@@ -98,11 +99,6 @@ def estimate_loss():
         out[split] = losses.mean()
     model.train()
     return out
-
-model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=1024, dropout=dropout) # start with model_args from command line
-
-config = GPTConfig(**model_args)
 
 model = GPT(config)
 m = model.to(device)
