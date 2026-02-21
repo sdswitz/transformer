@@ -1,4 +1,5 @@
 import os
+import argparse
 import pickle
 from contextlib import nullcontext
 import torch
@@ -14,6 +15,15 @@ num_samples = 10
 max_new_tokens = 500
 temperature = 1.0
 top_k = 200
+default_tokenizer_model_path = '/Users/samswitz/GitHub/transformer/tokenizer.model'
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    '--tokenizer-model-path',
+    default=default_tokenizer_model_path,
+    help='Path to tokenizer model file',
+)
+args = parser.parse_args()
 
 # if torch.cuda.is_available():
 #     device = 'cuda'
@@ -38,9 +48,7 @@ model.eval()
 model.to(device)
 
 enc = BasicTokenizer()
-
-## TODO Parameterize this
-enc.load('/Users/samswitz/GitHub/transformer/tokenizer.model')
+enc.load(args.tokenizer_model_path)
 
 start_ids = enc.encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
