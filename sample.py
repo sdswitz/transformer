@@ -8,7 +8,7 @@ from model import GPTConfig, GPT
 from tokenizer.basic_bpe import BasicTokenizer
 
 
-out_dir = 'output'
+out_dir = 'output/vocab256_block512'
 start = "\n"
 num_samples = 10
 max_new_tokens = 500
