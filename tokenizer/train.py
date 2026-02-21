@@ -7,7 +7,7 @@ with open('/Users/samswitz/GitHub/transformer/data/input.txt', 'r', encoding='ut
     text = f.read()
 print('big load of data')
 
-vocab_size = 1024
+vocab_size = 256
 tokenizer = BasicTokenizer()
 
 t0 = time.time()

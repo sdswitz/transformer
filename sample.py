@@ -45,9 +45,12 @@ enc.load('/Users/samswitz/GitHub/transformer/tokenizer.model')
 start_ids = enc.encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
 
+# Pass prompt length as prefix_len so bidirectional layers see the full prompt
+prefix_len = x.size(1)
+
 with torch.no_grad():
     with ctx:
         for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k)
+            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k, prefix_len=prefix_len)
             print(enc.decode(y[0].tolist()))
             print('---------------')
