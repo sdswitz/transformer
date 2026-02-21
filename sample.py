@@ -45,6 +45,12 @@ model.to(device)
 
 enc = BasicTokenizer()
 enc.load(args.tokenizer_model_path)
+tokenizer_vocab_size = len(enc.vocab)
+if tokenizer_vocab_size != model.config.vocab_size:
+    raise ValueError(
+        f"Tokenizer vocab size ({tokenizer_vocab_size}) does not match model vocab size ({model.config.vocab_size}). "
+        "Use matching tokenizer/checkpoint pair or retrain with aligned vocab_size."
+    )
 
 start_ids = enc.encode(start)
 x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])

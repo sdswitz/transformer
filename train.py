@@ -47,7 +47,7 @@ bias: bool = False
 n_causal_layers: int = 4  # 4 causal + 2 bidirectional
 
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=1024, dropout=dropout,
+                  bias=bias, vocab_size=vocab_size, dropout=dropout,
                   n_causal_layers=n_causal_layers)
 
 config = GPTConfig(**model_args)
