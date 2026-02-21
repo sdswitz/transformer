@@ -10,10 +10,10 @@ from tokenizer.basic_bpe import BasicTokenizer
 
 
 out_dir = 'output/vocab256_block512'
-start = "\n"
-num_samples = 10
+start = "Hello"
+num_samples = 1
 max_new_tokens = 500
-temperature = 1.0
+temperature = 0.9
 top_k = 200
 default_tokenizer_model_path = '/Users/samswitz/GitHub/transformer/tokenizer.model'
 
@@ -25,15 +25,11 @@ parser.add_argument(
 )
 args = parser.parse_args()
 
-# if torch.cuda.is_available():
-#     device = 'cuda'
-# elif torch.backends.mps.is_available():
-#     device = 'mps'
-# else:
-#     device = 'cpu'
+if torch.cuda.is_available():
+    device = 'cuda'
+else:
+    device = 'cpu'
 
-device = 'cpu'
-device_type = 'cpu'
 
 ctx = nullcontext()
 
