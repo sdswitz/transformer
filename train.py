@@ -1,4 +1,5 @@
 import os
+import argparse
 import time
 import math
 import pickle
@@ -28,6 +29,28 @@ else:
 eval_iters = int(max_iters * 0.05)
 
 enc = BasicTokenizer()
+default_tokenizer_model_path = os.path.join(os.path.dirname(__file__), 'tokenizer.model')
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    '--tokenizer-model-path',
+    default=default_tokenizer_model_path,
+    help='Path to tokenizer model file used for data encoding',
+)
+parser.add_argument(
+    '--compile',
+    dest='use_compile',
+    action='store_true',
+    help='Enable torch.compile for the model',
+)
+parser.add_argument(
+    '--no-compile',
+    dest='use_compile',
+    action='store_false',
+    help='Disable torch.compile for the model',
+)
+parser.set_defaults(use_compile=False)
+args = parser.parse_args()
+enc.load(args.tokenizer_model_path)
 
 out_dir = 'output/vocab256_block512'
 os.makedirs(out_dir, exist_ok=True)
@@ -54,12 +77,21 @@ config = GPTConfig(**model_args)
 
 
 data_dir = os.path.join('data')
+train_data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+max_data_id = int(max(train_data.max(), val_data.max()))
+if max_data_id >= vocab_size:
+    raise ValueError(
+        f"Data token id range is [0, {max_data_id}] but model/tokenizer vocab_size is {vocab_size}. "
+        "Rebuild data bins with the same tokenizer model used for training."
+    )
+
 # data loading
 def get_batch(split):
     if split == 'train':
-        data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
+        data = train_data
     else:
-        data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
+        data = val_data
     ix = torch.randint(len(data) - block_size, (batch_size,))
     x = torch.stack([torch.from_numpy((data[i:i+block_size]).astype(np.int64)) for i in ix])
     y = torch.stack([torch.from_numpy((data[i+1:i+block_size+1]).astype(np.int64)) for i in ix])
@@ -88,8 +120,10 @@ def estimate_loss():
     return out
 
 model = GPT(config)
-m = model.to(device)
-print(sum(p.numel() for p in m.parameters())/1e6, 'M parameters')
+model = model.to(device)
+if args.use_compile:
+    model = torch.compile(model)
+print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
 
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)

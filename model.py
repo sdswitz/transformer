@@ -78,12 +78,12 @@ class SelfAttn(nn.Module):
                     attn_mask = causal_mask.unsqueeze(0).unsqueeze(0)  # (1, 1, T, T)
                 else:
                     # Per-example prefix_len: prefix_len is (B,) tensor
-                    causal_mask = torch.ones(T, T, dtype=torch.bool, device=x.device).tril()
-                    causal_mask = causal_mask.unsqueeze(0).expand(B, -1, -1).clone()  # (B, T, T)
-                    for i in range(B):
-                        pl = prefix_len[i].item()
-                        causal_mask[i, :pl, :pl] = True
-                    attn_mask = causal_mask.unsqueeze(1)  # (B, 1, T, T)
+                    causal_mask = torch.ones(T, T, dtype=torch.bool, device=x.device).tril()  # (T, T)
+                    prefix_len = prefix_len.to(device=x.device, dtype=torch.long)
+                    pos = torch.arange(T, device=x.device)
+                    is_prefix = pos.unsqueeze(0) < prefix_len.unsqueeze(1)  # (B, T)
+                    prefix_block = is_prefix.unsqueeze(2) & is_prefix.unsqueeze(1)  # (B, T, T)
+                    attn_mask = (causal_mask.unsqueeze(0) | prefix_block).unsqueeze(1)  # (B, 1, T, T)
 
                 if self.flash:
                     y = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask, dropout_p=self.dropout if self.training else 0, is_causal=False)
@@ -210,9 +210,10 @@ class GPT(nn.Module):
                     masked_targets[:, :prefix_len] = -1
                 else:
                     # Per-example prefix lengths
-                    masked_targets = targets.clone()
-                    for i in range(b):
-                        masked_targets[i, :prefix_len[i]] = -1
+                    prefix_len = prefix_len.to(device=targets.device, dtype=torch.long)
+                    pos = torch.arange(t, device=targets.device)
+                    prefix_mask = pos.unsqueeze(0) < prefix_len.unsqueeze(1)
+                    masked_targets = targets.masked_fill(prefix_mask, -1)
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), masked_targets.view(-1), ignore_index=-1)
             else:
                 loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1)
