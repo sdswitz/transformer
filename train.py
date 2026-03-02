@@ -63,8 +63,8 @@ vocab_size = args.vocab_size if args.vocab_size is not None else len(enc.vocab)
 
 if torch.cuda.is_available():
     device = 'cuda'
-elif torch.backends.mps.is_available():
-    device = 'mps'
+# elif torch.backends.mps.is_available():
+#     device = 'mps'
 else:
     device = 'cpu'
 
@@ -134,7 +134,7 @@ print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
 
 if args.wandb:
     import wandb
-    wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=model_args)
+    wandb.init(entity="switz", project=args.wandb_project, name=args.wandb_run_name, config=model_args)
 
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
