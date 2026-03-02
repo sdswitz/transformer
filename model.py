@@ -8,6 +8,14 @@ import inspect
 
 ## Borrowed heavily from nanoGPT
 
+def apply_rotary_emb(x, cos, sin):
+    assert x.ndim == 4  # multihead attention
+    d = x.shape[3] // 2
+    x1, x2 = x[..., :d], x[..., d:] # split up last dim into two halves
+    y1 = x1 * cos + x2 * sin # rotate pairs of dims
+    y2 = x1 * (-sin) + x2 * cos
+    return torch.cat([y1, y2], 3)
+
 class LayerNorm(nn.Module):
     def __init__(self, ndim, bias):
         super().__init__()
@@ -37,13 +45,18 @@ class SelfAttn(nn.Module):
         if not self.flash:
             self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size))
 
-    def forward(self, x, prefix_len=None):
+    def forward(self, x, prefix_len=None, cos_sin=None):
         B, T, C = x.size()
 
         q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+
+        if cos_sin is not None:
+            cos, sin = cos_sin
+            q = apply_rotary_emb(q, cos, sin)
+            k = apply_rotary_emb(k, cos, sin)
 
         if self.is_causal:
             # Pure causal attention — same as original CausalSelfAttn
@@ -124,8 +137,8 @@ class Block(nn.Module):
         self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
         self.mlp = MLP(config)
 
-    def forward(self, x, prefix_len=None):
-        x = x + self.attn(self.ln_1(x), prefix_len=prefix_len)
+    def forward(self, x, prefix_len=None, cos_sin=None):
+        x = x + self.attn(self.ln_1(x), prefix_len=prefix_len, cos_sin=cos_sin)
         x = x + self.mlp(self.ln_2(x))
         return x
 
@@ -156,11 +169,16 @@ class GPT(nn.Module):
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.block_size, config.n_embd),
             drop = nn.Dropout(config.dropout),
             h = nn.ModuleList(blocks),
             ln_f = LayerNorm(config.n_embd, bias=config.bias),
         ))
+
+        # Precompute RoPE embeddings
+        head_dim = config.n_embd // config.n_head
+        cos, sin = self._precompute_rotary_embeddings(config.block_size, head_dim)
+        self.register_buffer('cos', cos, persistent=False)
+        self.register_buffer('sin', sin, persistent=False)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer['wte'].weight = self.lm_head.weight
 
@@ -173,10 +191,17 @@ class GPT(nn.Module):
         n_bidir = config.n_layer - config.n_causal_layers
         print(f"number of params: {self.get_num_params()/1e6:.2f}M ({n_causal} causal + {n_bidir} bidirectional layers)")
 
+    @staticmethod
+    def _precompute_rotary_embeddings(seq_len, head_dim):
+        freqs = 1.0 / (10000.0 ** (torch.arange(0, head_dim, 2).float() / head_dim))
+        t = torch.arange(seq_len).float()
+        freqs = torch.outer(t, freqs)  # (seq_len, head_dim//2)
+        cos = freqs.cos().unsqueeze(0).unsqueeze(0)  # (1, 1, seq_len, head_dim//2)
+        sin = freqs.sin().unsqueeze(0).unsqueeze(0)  # (1, 1, seq_len, head_dim//2)
+        return cos, sin
+
     def get_num_params(self, non_embedding=True):
         n_params = sum(p.numel() for p in self.parameters())
-        if non_embedding:
-            n_params -= self.transformer['wpe'].weight.numel()
         return n_params
 
     def _init_weights(self, module):
@@ -184,20 +209,19 @@ class GPT(nn.Module):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.Embedding):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        elif isinstance(module, nn.Embedding):
+            torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, targets=None, prefix_len=None):
         device = idx.device
         b, t = idx.size()
         assert t <= self.config.block_size, f"Cannot forward sequence of len {t}, block size only {self.config.block_size}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device)
 
         tok_emb = self.transformer.wte(idx)
-        pos_emb = self.transformer.wpe(pos)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        x = self.transformer.drop(tok_emb)
+        cos_sin = (self.cos[:, :, :t].to(device), self.sin[:, :, :t].to(device))
         for block in self.transformer.h:
-            x = block(x, prefix_len=prefix_len)
+            x = block(x, prefix_len=prefix_len, cos_sin=cos_sin)
         x = self.transformer.ln_f(x)
 
         if targets is not None:
