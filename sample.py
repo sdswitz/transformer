@@ -1,66 +1,62 @@
 import os
 import argparse
-import pickle
 from contextlib import nullcontext
 import torch
-import tiktoken
 from model import GPTConfig, GPT
-
 from tokenizer.basic_bpe import BasicTokenizer
 
-
-out_dir = 'output/vocab256_block512'
-start = "Hello"
-num_samples = 1
-max_new_tokens = 500
-temperature = 0.9
-top_k = 200
-default_tokenizer_model_path = '/Users/samswitz/GitHub/transformer/tokenizer.model'
+default_tokenizer_model_path = os.path.join(os.path.dirname(__file__), 'tokenizer.model')
 
 parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--tokenizer-model-path',
-    default=default_tokenizer_model_path,
-    help='Path to tokenizer model file',
-)
+parser.add_argument('--checkpoint', type=str, default='output/ckpt.pt', help='Path to checkpoint file')
+parser.add_argument('--tokenizer-model-path', default=default_tokenizer_model_path)
+parser.add_argument('--prompt', type=str, default='Hello')
+parser.add_argument('--num-samples', type=int, default=1)
+parser.add_argument('--max-new-tokens', type=int, default=500)
+parser.add_argument('--temperature', type=float, default=0.9)
+parser.add_argument('--top-k', type=int, default=200)
+parser.add_argument('--byte-level', action='store_true', help='Use raw byte encoding instead of tokenizer')
 args = parser.parse_args()
 
 if torch.cuda.is_available():
     device = 'cuda'
+# elif torch.backends.mps.is_available():
+#     device = 'mps'
 else:
     device = 'cpu'
 
-
-ctx = nullcontext()
-
-ckpt_path = os.path.join(out_dir, 'ckpt.pt')
-checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
+checkpoint = torch.load(args.checkpoint, map_location=device, weights_only=False)
 gptconf = GPTConfig(**checkpoint['model_args'])
 model = GPT(gptconf)
+
+# handle checkpoints saved with/without RoPE buffers
 state_dict = checkpoint['model']
-model.load_state_dict(state_dict)
+state_dict = {k: v for k, v in state_dict.items() if k not in ('cos', 'sin')}
+model.load_state_dict(state_dict, strict=False)
 
 model.eval()
 model.to(device)
 
-enc = BasicTokenizer()
-enc.load(args.tokenizer_model_path)
-tokenizer_vocab_size = len(enc.vocab)
-if tokenizer_vocab_size != model.config.vocab_size:
-    raise ValueError(
-        f"Tokenizer vocab size ({tokenizer_vocab_size}) does not match model vocab size ({model.config.vocab_size}). "
-        "Use matching tokenizer/checkpoint pair or retrain with aligned vocab_size."
-    )
+if args.byte_level:
+    encode = lambda s: list(s.encode('utf-8'))
+    decode = lambda t: bytes(t).decode('utf-8', errors='replace')
+else:
+    enc = BasicTokenizer()
+    enc.load(args.tokenizer_model_path)
+    if len(enc.vocab) != model.config.vocab_size:
+        raise ValueError(
+            f"Tokenizer vocab size ({len(enc.vocab)}) != model vocab size ({model.config.vocab_size}). "
+            "Use --byte-level for byte-level models or provide matching tokenizer."
+        )
+    encode = enc.encode
+    decode = enc.decode
 
-start_ids = enc.encode(start)
-x = (torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...])
-
-# Pass prompt length as prefix_len so bidirectional layers see the full prompt
+start_ids = encode(args.prompt)
+x = torch.tensor(start_ids, dtype=torch.long, device=device)[None, ...]
 prefix_len = x.size(1)
 
 with torch.no_grad():
-    with ctx:
-        for k in range(num_samples):
-            y = model.generate(x, max_new_tokens, temperature=temperature, top_k=top_k, prefix_len=prefix_len)
-            print(enc.decode(y[0].tolist()))
-            print('---------------')
+    for k in range(args.num_samples):
+        y = model.generate(x, args.max_new_tokens, temperature=args.temperature, top_k=args.top_k, prefix_len=prefix_len)
+        print(decode(y[0].tolist()))
+        print('---------------')

@@ -42,6 +42,11 @@ parser.add_argument('--n-causal-layers', type=int, default=4)
 parser.add_argument('--data-dir', type=str, default='data')
 parser.add_argument('--out-dir', type=str, default='output')
 
+# logging
+parser.add_argument('--wandb', action='store_true', help='Log to Weights & Biases')
+parser.add_argument('--wandb-project', type=str, default='transformer')
+parser.add_argument('--wandb-run-name', type=str, default=None)
+
 args = parser.parse_args()
 
 # load tokenizer
@@ -127,6 +132,10 @@ if args.use_compile:
     model = torch.compile(model)
 print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
 
+if args.wandb:
+    import wandb
+    wandb.init(project=args.wandb_project, name=args.wandb_run_name, config=model_args)
+
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
@@ -140,6 +149,8 @@ for iter in range(max_iters):
     if iter % eval_interval == 0 or iter == max_iters - 1:
         losses = estimate_loss()
         print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        if args.wandb:
+            wandb.log({'train/loss': losses['train'], 'val/loss': losses['val']}, step=iter)
 
     if iter % checkpoint_step == 0 or iter == max_iters - 1:
         checkpoint = {
@@ -164,3 +175,6 @@ for iter in range(max_iters):
 elapsed = time.time() - train_start
 minutes, seconds = divmod(elapsed, 60)
 print(f"training complete: {int(minutes)}m {seconds:.1f}s")
+
+if args.wandb:
+    wandb.finish()
