@@ -46,6 +46,7 @@ parser.add_argument('--out-dir', type=str, default='output')
 parser.add_argument('--wandb', action='store_true', help='Log to Weights & Biases')
 parser.add_argument('--wandb-project', type=str, default='transformer')
 parser.add_argument('--wandb-run-name', type=str, default=None)
+parser.add_argument('--wandb-entity', type=str, default=None)
 
 args = parser.parse_args()
 
@@ -134,7 +135,7 @@ print(sum(p.numel() for p in model.parameters())/1e6, 'M parameters')
 
 if args.wandb:
     import wandb
-    wandb.init(entity="switz", project=args.wandb_project, name=args.wandb_run_name, config=model_args)
+    wandb.init(entity=args.wandb_entity, project=args.wandb_project, name=args.wandb_run_name, config=model_args)
 
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
