@@ -26,7 +26,10 @@ parser.set_defaults(use_compile=False)
 parser.add_argument('--max-iters', type=int, default=500)
 parser.add_argument('--eval-interval', type=int, default=50)
 parser.add_argument('--learning-rate', type=float, default=1e-3)
+parser.add_argument('--min-lr', type=float, default=1e-4)
+parser.add_argument('--warmup-iters', type=int, default=100)
 parser.add_argument('--batch-size', type=int, default=64)
+parser.add_argument('--patience', type=int, default=0, help='Stop after N evals with no val loss improvement (0=disabled)')
 
 # model hyperparameters
 parser.add_argument('--block-size', type=int, default=512)
@@ -140,18 +143,42 @@ if args.wandb:
 # create a PyTorch optimizer
 optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
+def get_lr(it):
+    # linear warmup
+    if it < args.warmup_iters:
+        return learning_rate * (it + 1) / args.warmup_iters
+    # cosine decay down to min_lr
+    decay_ratio = (it - args.warmup_iters) / max(1, max_iters - args.warmup_iters)
+    coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return args.min_lr + coeff * (learning_rate - args.min_lr)
+
 checkpoint_step = max_iters / 4
 
 train_start = time.time()
+best_val_loss = float('inf')
+evals_without_improvement = 0
 
 for iter in range(max_iters):
+
+    # set learning rate for this iteration
+    lr = get_lr(iter)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr
 
     # every once in a while evaluate the loss on train and val sets
     if iter % eval_interval == 0 or iter == max_iters - 1:
         losses = estimate_loss()
-        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}")
+        print(f"step {iter}: train loss {losses['train']:.4f}, val loss {losses['val']:.4f}, lr {lr:.2e}")
         if args.wandb:
-            wandb.log({'train/loss': losses['train'], 'val/loss': losses['val']}, step=iter)
+            wandb.log({'train/loss': losses['train'], 'val/loss': losses['val'], 'lr': lr}, step=iter)
+        if losses['val'] < best_val_loss:
+            best_val_loss = losses['val']
+            evals_without_improvement = 0
+        else:
+            evals_without_improvement += 1
+        if args.patience > 0 and evals_without_improvement >= args.patience:
+            print(f"early stopping at step {iter}: no val loss improvement for {args.patience} evals")
+            break
 
     if iter % checkpoint_step == 0 or iter == max_iters - 1:
         checkpoint = {
