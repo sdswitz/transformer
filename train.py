@@ -14,11 +14,48 @@ from torch.distributed import init_process_group, destroy_process_group
 from model import GPTConfig, GPT
 from tokenizer.basic_bpe import BasicTokenizer
 
-# hyperparameters
-max_iters = 500
-eval_interval = 50
+# argument parsing
+default_tokenizer_model_path = os.path.join(os.path.dirname(__file__), 'tokenizer.model')
+parser = argparse.ArgumentParser()
+parser.add_argument('--tokenizer-model-path', default=default_tokenizer_model_path)
+parser.add_argument('--compile', dest='use_compile', action='store_true')
+parser.add_argument('--no-compile', dest='use_compile', action='store_false')
+parser.set_defaults(use_compile=False)
 
-learning_rate = 1e-3
+# training hyperparameters
+parser.add_argument('--max-iters', type=int, default=500)
+parser.add_argument('--eval-interval', type=int, default=50)
+parser.add_argument('--learning-rate', type=float, default=1e-3)
+parser.add_argument('--batch-size', type=int, default=64)
+
+# model hyperparameters
+parser.add_argument('--block-size', type=int, default=512)
+parser.add_argument('--vocab-size', type=int, default=None)
+parser.add_argument('--n-layer', type=int, default=6)
+parser.add_argument('--n-head', type=int, default=6)
+parser.add_argument('--n-embd', type=int, default=384)
+parser.add_argument('--dropout', type=float, default=0.0)
+parser.add_argument('--bias', action='store_true')
+parser.add_argument('--n-causal-layers', type=int, default=4)
+
+# paths
+parser.add_argument('--data-dir', type=str, default='data')
+parser.add_argument('--out-dir', type=str, default='output')
+
+args = parser.parse_args()
+
+# load tokenizer
+enc = BasicTokenizer()
+enc.load(args.tokenizer_model_path)
+
+# resolve settings
+max_iters = args.max_iters
+eval_interval = args.eval_interval
+learning_rate = args.learning_rate
+batch_size = args.batch_size
+block_size = args.block_size
+vocab_size = args.vocab_size if args.vocab_size is not None else len(enc.vocab)
+
 if torch.cuda.is_available():
     device = 'cuda'
 elif torch.backends.mps.is_available():
@@ -26,57 +63,22 @@ elif torch.backends.mps.is_available():
 else:
     device = 'cpu'
 
-eval_iters = int(max_iters * 0.05)
+eval_iters = max(1, int(max_iters * 0.05))
 
-enc = BasicTokenizer()
-default_tokenizer_model_path = os.path.join(os.path.dirname(__file__), 'tokenizer.model')
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    '--tokenizer-model-path',
-    default=default_tokenizer_model_path,
-    help='Path to tokenizer model file used for data encoding',
-)
-parser.add_argument(
-    '--compile',
-    dest='use_compile',
-    action='store_true',
-    help='Enable torch.compile for the model',
-)
-parser.add_argument(
-    '--no-compile',
-    dest='use_compile',
-    action='store_false',
-    help='Disable torch.compile for the model',
-)
-parser.set_defaults(use_compile=False)
-args = parser.parse_args()
-enc.load(args.tokenizer_model_path)
-
-out_dir = 'output/vocab256_block512'
+out_dir = args.out_dir
 os.makedirs(out_dir, exist_ok=True)
 print(f"using device: {device}")
 print(f"output directory: {out_dir}")
 
-# model hyperparams — smaller prefix-LM config
-batch_size = 64
-
-block_size: int = 512
-vocab_size: int = len(enc.vocab)
-n_layer: int = 6
-n_head: int = 6
-n_embd: int = 384
-dropout: float = 0.0
-bias: bool = False
-n_causal_layers: int = 4  # 4 causal + 2 bidirectional
-
-model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
-                  bias=bias, vocab_size=vocab_size, dropout=dropout,
-                  n_causal_layers=n_causal_layers)
-
+model_args = dict(
+    block_size=block_size, vocab_size=vocab_size,
+    n_layer=args.n_layer, n_head=args.n_head, n_embd=args.n_embd,
+    dropout=args.dropout, bias=args.bias,
+    n_causal_layers=args.n_causal_layers,
+)
 config = GPTConfig(**model_args)
 
-
-data_dir = os.path.join('data')
+data_dir = args.data_dir
 train_data = np.memmap(os.path.join(data_dir, 'train.bin'), dtype=np.uint16, mode='r')
 val_data = np.memmap(os.path.join(data_dir, 'val.bin'), dtype=np.uint16, mode='r')
 max_data_id = int(max(train_data.max(), val_data.max()))
@@ -130,6 +132,8 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate)
 
 checkpoint_step = max_iters / 4
 
+train_start = time.time()
+
 for iter in range(max_iters):
 
     # every once in a while evaluate the loss on train and val sets
@@ -156,3 +160,7 @@ for iter in range(max_iters):
     optimizer.zero_grad(set_to_none=True)
     loss.backward()
     optimizer.step()
+
+elapsed = time.time() - train_start
+minutes, seconds = divmod(elapsed, 60)
+print(f"training complete: {int(minutes)}m {seconds:.1f}s")
