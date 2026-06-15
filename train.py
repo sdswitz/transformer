@@ -40,6 +40,7 @@ parser.add_argument('--n-embd', type=int, default=384)
 parser.add_argument('--dropout', type=float, default=0.0)
 parser.add_argument('--bias', action='store_true')
 parser.add_argument('--n-causal-layers', type=int, default=4)
+parser.add_argument('--lr_scheduler', type=str, default="base")
 
 # paths
 parser.add_argument('--data-dir', type=str, default='data')
@@ -152,6 +153,12 @@ def get_lr(it):
     coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
     return args.min_lr + coeff * (learning_rate - args.min_lr)
 
+# set --lr_scheduler to "alternative" to use this
+def alt_get_lr(it):
+    decay_ratio = (it - args.warmup_iters) / max(1, max_iters - args.warmup_iters)
+    coeff = 1.0 / (1.0 + math.exp(-(decay_ratio-0.5) * 10))  # sigmoid-like decay
+    return args.min_lr + coeff * (learning_rate - args.min_lr)
+
 checkpoint_step = max_iters / 4
 
 train_start = time.time()
@@ -161,7 +168,11 @@ evals_without_improvement = 0
 for iter in range(max_iters):
 
     # set learning rate for this iteration
-    lr = get_lr(iter)
+    if args.lr_scheduler == "alternative":
+        lr = alt_get_lr(iter)
+    else:
+        lr = get_lr(iter)
+
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
 
